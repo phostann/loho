@@ -1,0 +1,18 @@
+{
+  "name": "hid",
+  "version": "1.0.0",
+  "description": "hi design 是一个基于 React 的组件库，简称 hid，亦有 hidden 的寓意。",
+  "main": "index.js",
+  "scripts": {
+    "preview": "pnpm run -F preview dev",
+    "build": "pnpm run -F components build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "骸",
+  "license": "ISC",
+  "devDependencies": {
+    "@hid/utils": "workspace:^",
+    "typescript": "^5.5.4"
+  }
+}

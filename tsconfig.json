@@ -1,0 +1,23 @@
+{
+	"compilerOptions": {
+		"target": "ESNext",
+		"module": "ES6",
+		"declaration": false,
+		"noImplicitAny": false,
+		"removeComments": true,
+		"moduleResolution": "Node",
+		"esModuleInterop": true,
+		"reactNamespace": "React",
+		"jsx": "preserve",
+		"noLib": false,
+		"sourceMap": true,
+		"lib": ["ESNext", "DOM"],
+		"allowSyntheticDefaultImports": true,
+		"experimentalDecorators": false,
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"strict": true,
+		"skipLibCheck": true
+	},
+	"exclude": ["node_modules", "**/__tests__", "dist/**"]
+}

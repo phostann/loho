@@ -1,0 +1,14 @@
+.container {
+	// width: 100%;
+	box-sizing: border-box;
+	padding: 20px;
+
+	.box {
+		position: relative;
+	}
+}
+
+.tempContainer {
+	position: fixed;
+	left: -1000px;
+}
