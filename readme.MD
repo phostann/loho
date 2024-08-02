@@ -1,4 +1,4 @@
-### hid 基于 React 的一套组件库
+### hid 是一套基于 React 的组件库
 
 hid 意为 Hi Design，Hi 取自骸字对应的英文谐音单词。
 
