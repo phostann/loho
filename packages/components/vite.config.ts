@@ -1,14 +1,15 @@
-import {defineConfig} from 'vite'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
 import dts from "vite-plugin-dts"
 import path from 'node:path'
+
 
 // https://vitejs.dev/config/
 export default defineConfig({
     build: {
         lib: {
             entry: path.resolve(__dirname, './lib/index.ts'),
-            name: "hid-design",
+            name: "hi-design",
             fileName: format => `index.${format}.js`
         },
         rollupOptions: {
@@ -20,7 +21,8 @@ export default defineConfig({
                 }
             }
         },
-        sourcemap: "inline"
+        sourcemap: "inline",
+        watch: {}
     },
     plugins: [
         react(),

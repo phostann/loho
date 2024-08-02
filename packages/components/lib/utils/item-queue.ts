@@ -1,4 +1,4 @@
-export class MyQueue<T> {
+export class ItemQueue<T> {
     private lastDispatchIndex: number = -1;
 
     private items: Record<number, T> = {};
@@ -44,6 +44,10 @@ export class MyQueue<T> {
 
     public subscribe(callback: (items: Array<T>) => void) {
         this.subscribers.push(callback);
+    }
+
+    public unsubscribe() {
+        this.subscribers.length = 0
     }
 
     private dispatchItem() {

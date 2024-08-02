@@ -1,10 +1,11 @@
 .container {
-	// width: 100%;
+	width: 100%;
 	box-sizing: border-box;
 	padding: 20px;
 
 	.box {
 		position: relative;
+		overflow: hidden;
 	}
 }
 

@@ -20,27 +20,6 @@ function App() {
 			});
 	}, []);
 
-	useEffect(() => {
-		// setTimeout(() => {
-		// 	setColumn(3);
-		// }, 3000 * 1);
-		// setTimeout(() => {
-		// 	setColumn(4);
-		// }, 3000 * 2);
-		// setTimeout(() => {
-		// 	setColumn(5);
-		// }, 3000 * 3);
-		// setTimeout(() => {
-		// 	setColumn(6);
-		// }, 3000 * 4);
-		// setTimeout(() => {
-		// 	setColumn(7);
-		// }, 3000 * 5);
-		// setTimeout(() => {
-		// 	setColumn(8);
-		// }, 3000 * 6);
-	}, []);
-
 	return (
 		<>
 			<div className={styles.container} ref={ref}>
@@ -50,7 +29,10 @@ function App() {
 						data={data.slice(0)}
 						rowKey={"id"}
 						gutter={20}
-						columns={7}
+						columns={6}
+						onReachBottom={() => {
+							console.log("到达底部，加载更多");
+						}}
 						render={(item, width, x, y) => {
 							return (
 								<div

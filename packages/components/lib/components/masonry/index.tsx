@@ -1,9 +1,10 @@
 import * as React from "react";
-import { useEffect, useRef, useState } from "react";
-import styles from "./index.module.scss";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { MyQueue } from "../../utils/my-queue.ts";
-import { throttle } from "../../utils/utils.ts";
+import { ItemQueue } from "../../utils/item-queue.ts";
+import { debounce, throttle } from "../../utils/utils.ts";
+
+import styles from "./index.module.scss";
 
 type ItemWithPos<T> = {
 	x: number;
@@ -43,8 +44,17 @@ export interface MasonryProps<T> {
 	/**
 	 * 滚动容器
 	 */
-
 	scrollContainer: React.RefObject<HTMLDivElement>;
+
+	/**
+	 * 底部阈值，默认为 100
+	 */
+	bottomThreshold?: number;
+
+	/**
+	 * 到达底部
+	 */
+	onReachBottom?: () => void;
 
 	/**
 	 * 渲染函数
@@ -72,142 +82,45 @@ export function Masonry<T>({
 	gutter,
 	scrollContainer,
 	preRenderNumber = 6,
+	bottomThreshold = 100,
+	onReachBottom,
 	render,
 }: MasonryProps<T>) {
 	const containerRef = React.useRef<HTMLDivElement>(null);
 	const tempRef = React.useRef<HTMLDivElement>(null);
 	const ref = React.useRef<HTMLDivElement>(null);
 	const idxRef = useRef(0);
+	const containerWidthRef = useRef(0);
 
 	const [colWidth, setColWidth] = React.useState(0);
 	const [boxHeight, setBoxHeight] = React.useState(0);
+	const [scrollTop, setScrollTop] = useState(0);
 
 	const [preRenderChildren, setPreRenderChildren] = React.useState<
 		React.ReactNode[]
 	>([]);
+
 	const [itemWithPos, setItemWithPos] = useState<ItemWithPos<T>[]>([]);
 
-	const [scrollTop, setScrollTop] = useState(0);
-
-	useEffect(() => {
-		if (
-			containerRef.current == null ||
-			tempRef.current == null ||
-			ref.current == null ||
-			data.length <= 0
-		) {
-			return;
-		}
-
-		const rect = containerRef.current.getBoundingClientRect();
-		const paddingLeft = parseInt(
-			getComputedStyle(containerRef.current).paddingLeft
-		);
-		const paddingRight = parseInt(
-			getComputedStyle(containerRef.current).paddingRight
-		);
-		const totalWidth = rect.width - paddingLeft - paddingRight;
-		const colWidth = (totalWidth - (columns - 1) * gutter) / columns;
-
-		setColWidth(colWidth);
-
-		const hArr = new Array(columns).fill(0);
-
-		const myQueue = new MyQueue<T>();
-		// 先订阅
-		myQueue.subscribe((items) => {
-			setPreRenderChildren(
-				items.map((item) =>
-					createPortal(
-						render(item, colWidth, 0, 0, 0),
-						tempRef.current!,
-						item[rowKey] as string
-					)
-				)
+	const calculateColWidth = useCallback(() => {
+		if (containerRef.current && scrollContainer.current) {
+			const clientWidth = containerRef.current.clientWidth;
+			const paddingLeft = parseInt(
+				getComputedStyle(containerRef.current).paddingLeft
 			);
-		});
-
-		const batchDispatchItem = () => {
-			if (idxRef.current >= data.length - 1) {
-				setPreRenderChildren([]);
-				myQueue.clear();
-				return;
-			}
-			const items: Record<string, T> = {};
-			// 先进行预渲染
-			for (
-				let i = myQueue.size() - 1;
-				i < myQueue.size() - 1 + preRenderNumber && i < data.length;
-				i++
-			) {
-				items[i] = data[i];
-			}
-			myQueue.setItems(items);
-		};
-
-		// 监听 tempContainer 变化
-		const observer = new MutationObserver((records) => {
-			const items: ItemWithPos<T>[] = [];
-			for (const record of records) {
-				for (let i = 0; i < record.addedNodes.length; i++) {
-					let col = idxRef.current % columns;
-					if (idxRef.current > columns) {
-						for (let n = 0; n < columns; n++) {
-							if (hArr[n] < hArr[col]) {
-								col = n;
-							}
-						}
-					}
-					const offsetHeight = (record.addedNodes[i] as HTMLElement)
-						.offsetHeight;
-					items.push({
-						x: (colWidth + gutter) * col,
-						y: hArr[col],
-						width: colWidth,
-						height: offsetHeight,
-						bottom: hArr[col] + offsetHeight,
-						index: idxRef.current,
-						item: data[idxRef.current++],
-					});
-					hArr[col] += offsetHeight + gutter;
-					setBoxHeight(Math.max(...hArr));
-				}
-			}
-
-			setItemWithPos((prev) => [...prev, ...items]);
-
-			// 继续派发
-			batchDispatchItem();
-		});
-
-		observer.observe(tempRef.current, { childList: true, subtree: true });
-
-		// 先派发第一批元素
-		batchDispatchItem();
-	}, [columns, gutter, data, render, rowKey, preRenderNumber]);
-
-	useEffect(() => {
-		if (scrollContainer.current == null) {
-			return;
+			const paddingRight = parseInt(
+				getComputedStyle(containerRef.current).paddingRight
+			);
+			if (containerWidthRef.current === clientWidth) return;
+			containerWidthRef.current = clientWidth;
+			scrollContainer.current.scrollTop = 0;
+			setColWidth(
+				(clientWidth - (columns - 1) * gutter - paddingLeft - paddingRight) /
+					columns
+			);
 		}
+	}, [columns, gutter, scrollContainer]);
 
-		const onScroll = throttle((e: WindowEventMap["scroll"]) => {
-			const dom = e.currentTarget as HTMLElement;
-			setScrollTop(dom.scrollTop);
-		}, 60);
-
-		console.log(scrollContainer.current);
-
-		const container = scrollContainer.current;
-
-		container?.addEventListener("scroll", onScroll, false);
-
-		return () => {
-			container?.removeEventListener("scroll", onScroll, false);
-		};
-	}, [scrollContainer]);
-
-	// 是否应该渲染
 	const shouldRender = React.useCallback(
 		(item: ItemWithPos<T>) => {
 			if (scrollContainer.current == null) {
@@ -220,21 +133,175 @@ export function Masonry<T>({
 			const top = item.y - scrollTop;
 			const bottom = item.bottom - scrollTop;
 
-			const x = -100;
-			const y = offsetHeight + 100;
+			const threshold = 800;
 
-			if (
+			const x = -threshold;
+			const y = offsetHeight + threshold;
+
+			return (
 				(top > x && top < y) ||
 				(bottom > x && bottom < y) ||
 				(top < x && bottom > y)
-			) {
-				return true;
+			);
+		},
+		[scrollContainer, scrollTop]
+	);
+
+	useEffect(() => {
+		if (
+			scrollContainer.current == null ||
+			containerRef.current == null ||
+			tempRef.current == null ||
+			ref.current == null ||
+			data.length === 0 ||
+			colWidth === 0
+		) {
+			return;
+		}
+
+		idxRef.current = 0;
+		setPreRenderChildren([]);
+		setItemWithPos([]);
+
+		// 渲染到 temp 容器中，获取 dom 真实尺寸
+		const queue = new ItemQueue<T>();
+		const hArr = new Array(columns).fill(0);
+
+		queue.subscribe((items) => {
+			setPreRenderChildren(
+				items.map((item, index) =>
+					createPortal(
+						render(item, colWidth, 0, 0, index),
+						tempRef.current!,
+						item[rowKey] as string
+					)
+				)
+			);
+		});
+
+		const preRenderItem = () => {
+			if (data.length === 0 || idxRef.current >= data.length) {
+				setBoxHeight(Math.max(...hArr));
+				setPreRenderChildren([]);
+				return;
+			}
+			queue.clear();
+			const items = data.slice(
+				idxRef.current,
+				idxRef.current + preRenderNumber
+			);
+			queue.setItems(items);
+		};
+
+		const observerCallback = () => {
+			const items: ItemWithPos<T>[] = [];
+			const start = idxRef.current;
+			tempRef.current?.childNodes?.forEach((node) => {
+				const ele = node as HTMLElement;
+				let col = idxRef.current % columns;
+				if (idxRef.current >= columns) {
+					col = hArr.indexOf(Math.min(...hArr));
+				}
+				items.push({
+					x: col * (colWidth + gutter),
+					y: hArr[col],
+					width: colWidth,
+					height: ele.offsetHeight,
+					bottom: hArr[col] + ele.offsetHeight,
+					index: idxRef.current,
+					item: data[idxRef.current],
+				});
+				idxRef.current++;
+				hArr[col] += ele.offsetHeight + gutter;
+			});
+
+			// 如果是第一次渲染，则直接设置
+			if (start === 0) {
+				setItemWithPos(items);
+			} else {
+				setItemWithPos((prev) => [...prev, ...items]);
 			}
 
-			return false;
-		},
-		[scrollTop, scrollContainer]
-	);
+			preRenderItem();
+		};
+
+		const observer = new MutationObserver(observerCallback);
+
+		observer.observe(tempRef.current, {
+			childList: true,
+			subtree: true,
+		});
+
+		preRenderItem();
+
+		return () => {
+			queue.unsubscribe();
+			observer.disconnect();
+		};
+	}, [
+		colWidth,
+		columns,
+		data,
+		gutter,
+		preRenderNumber,
+		render,
+		rowKey,
+		scrollContainer,
+	]);
+
+	useEffect(() => {
+		const delay = 200;
+
+		const throttledCallback = throttle(calculateColWidth, delay);
+		const debouncedCallback = debounce(calculateColWidth, delay);
+
+		const resizeObserver = new ResizeObserver(() => {
+			throttledCallback();
+			debouncedCallback();
+		});
+
+		if (containerRef.current) {
+			resizeObserver.observe(containerRef.current);
+		}
+		return () => resizeObserver.disconnect();
+	}, [calculateColWidth]);
+
+	// 监听滚动
+	useEffect(() => {
+		const onScroll = () => {
+			if (scrollContainer.current == null) {
+				return;
+			}
+			setScrollTop(scrollContainer.current.scrollTop);
+			if (
+				scrollContainer.current.scrollTop +
+					scrollContainer.current.offsetHeight >=
+				scrollContainer.current.scrollHeight - bottomThreshold
+			) {
+				onReachBottom?.();
+			}
+		};
+
+		const container = scrollContainer.current;
+
+		const delay = 50;
+
+		const throttledOnScroll = throttle(onScroll, delay);
+		const debouncedOnScroll = debounce(onScroll, delay);
+
+		container?.addEventListener(
+			"scroll",
+			() => {
+				throttledOnScroll();
+				debouncedOnScroll();
+			},
+			false
+		);
+
+		return () => {
+			container?.removeEventListener("scroll", onScroll, false);
+		};
+	}, [bottomThreshold, onReachBottom, scrollContainer]);
 
 	return (
 		<div className={styles.container} ref={containerRef}>
@@ -252,7 +319,9 @@ export function Masonry<T>({
 			>
 				{itemWithPos.filter(shouldRender).map((item) => (
 					<React.Fragment key={item.item[rowKey] as React.Key}>
-						{render(item.item, colWidth, item.x, item.y, item.index)}
+						{shouldRender(item)
+							? render(item.item, colWidth, item.x, item.y, item.index)
+							: null}
 					</React.Fragment>
 				))}
 			</div>
