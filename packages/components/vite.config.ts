@@ -21,8 +21,8 @@ export default defineConfig({
                 }
             }
         },
-        sourcemap: "inline",
-        watch: {}
+        // sourcemap: "inline",
+        // watch: {}
     },
     plugins: [
         react(),
