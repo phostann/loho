@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ItemQueue } from "../../utils/item-queue.ts";
 import { debounce, throttle } from "../../utils/utils.ts";
@@ -37,7 +37,7 @@ export interface MasonryProps<T> {
 	 */
 	gutter: number;
 	/**
-	 * 预渲染数量, 默认为 6
+	 * 预渲染数量, 默认为 40
 	 */
 	preRenderNumber?: number;
 
@@ -81,7 +81,7 @@ export function Masonry<T>({
 	columns,
 	gutter,
 	scrollContainer,
-	preRenderNumber = 6,
+	preRenderNumber = 40,
 	bottomThreshold = 100,
 	onReachBottom,
 	render,
@@ -91,16 +91,19 @@ export function Masonry<T>({
 	const ref = React.useRef<HTMLDivElement>(null);
 	const idxRef = useRef(0);
 	const containerWidthRef = useRef(0);
+	const columnsRef = useRef(columns);
+	const gutterRef = useRef(gutter);
+	const colWidthRef = useRef(0);
+	const itemsRef = useRef<Record<string, ItemWithPos<T>>>({});
+	const hArrRef = useRef<Array<number>>(new Array(columns).fill(0));
 
 	const [colWidth, setColWidth] = React.useState(0);
 	const [boxHeight, setBoxHeight] = React.useState(0);
-	const [scrollTop, setScrollTop] = useState(0);
+	const [scrollTop, setScrollTop] = React.useState(0);
 
 	const [preRenderChildren, setPreRenderChildren] = React.useState<
 		React.ReactNode[]
 	>([]);
-
-	const [itemWithPos, setItemWithPos] = useState<ItemWithPos<T>[]>([]);
 
 	const calculateColWidth = useCallback(() => {
 		if (containerRef.current && scrollContainer.current) {
@@ -122,8 +125,8 @@ export function Masonry<T>({
 	}, [columns, gutter, scrollContainer]);
 
 	const shouldRender = React.useCallback(
-		(item: ItemWithPos<T>) => {
-			if (scrollContainer.current == null) {
+		(item?: ItemWithPos<T>) => {
+			if (scrollContainer.current == null || item == null) {
 				return false;
 			}
 
@@ -138,11 +141,12 @@ export function Masonry<T>({
 			const x = -threshold;
 			const y = offsetHeight + threshold;
 
-			return (
+			const isRender =
 				(top > x && top < y) ||
 				(bottom > x && bottom < y) ||
-				(top < x && bottom > y)
-			);
+				(top < x && bottom > y);
+
+			return isRender;
 		},
 		[scrollContainer, scrollTop]
 	);
@@ -159,13 +163,31 @@ export function Masonry<T>({
 			return;
 		}
 
+		let rerender = false;
+
+		// 如果 columns 变化
+		if (columnsRef.current !== columns) {
+			rerender = true;
+			columnsRef.current = columns;
+		}
+
+		// 如果  gutter 变化
+		if (gutterRef.current !== gutter) {
+			rerender = true;
+			gutterRef.current = gutter;
+		}
+
+		// 如果 colWidth 变化
+		if (colWidthRef.current !== colWidth) {
+			rerender = true;
+			colWidthRef.current = colWidth;
+		}
+
 		idxRef.current = 0;
 		setPreRenderChildren([]);
-		setItemWithPos([]);
 
 		// 渲染到 temp 容器中，获取 dom 真实尺寸
 		const queue = new ItemQueue<T>();
-		const hArr = new Array(columns).fill(0);
 
 		queue.subscribe((items) => {
 			setPreRenderChildren(
@@ -179,48 +201,57 @@ export function Masonry<T>({
 			);
 		});
 
+		let _data = data;
+
+		// 不需要全量渲染
+		if (!rerender) {
+			const idSet = new Set(Object.keys(itemsRef.current));
+			_data = data.filter((item) => !idSet.has(item[rowKey] as string));
+		} else {
+			itemsRef.current = {};
+			hArrRef.current = new Array(columns).fill(0);
+		}
+
 		const preRenderItem = () => {
-			if (data.length === 0 || idxRef.current >= data.length) {
-				setBoxHeight(Math.max(...hArr));
+			if (_data.length === 0 || idxRef.current >= _data.length) {
+				setBoxHeight(Math.max(...hArrRef.current));
 				setPreRenderChildren([]);
 				return;
 			}
 			queue.clear();
-			const items = data.slice(
-				idxRef.current,
-				idxRef.current + preRenderNumber
-			);
-			queue.setItems(items);
+			const items: Array<T> = [];
+			for (
+				let i = idxRef.current;
+				i < idxRef.current + preRenderNumber && i < _data.length;
+				i++
+			) {
+				items.push(_data[i]);
+			}
+			if (items.length !== 0) {
+				queue.setItems(items);
+			}
 		};
 
 		const observerCallback = () => {
-			const items: ItemWithPos<T>[] = [];
-			const start = idxRef.current;
 			tempRef.current?.childNodes?.forEach((node) => {
 				const ele = node as HTMLElement;
 				let col = idxRef.current % columns;
 				if (idxRef.current >= columns) {
-					col = hArr.indexOf(Math.min(...hArr));
+					col = hArrRef.current.indexOf(Math.min(...hArrRef.current));
 				}
-				items.push({
+
+				itemsRef.current[_data[idxRef.current][rowKey] as string] = {
 					x: col * (colWidth + gutter),
-					y: hArr[col],
+					y: hArrRef.current[col],
 					width: colWidth,
 					height: ele.offsetHeight,
-					bottom: hArr[col] + ele.offsetHeight,
+					bottom: hArrRef.current[col] + ele.offsetHeight,
 					index: idxRef.current,
-					item: data[idxRef.current],
-				});
+					item: _data[idxRef.current],
+				};
 				idxRef.current++;
-				hArr[col] += ele.offsetHeight + gutter;
+				hArrRef.current[col] += ele.offsetHeight + gutter;
 			});
-
-			// 如果是第一次渲染，则直接设置
-			if (start === 0) {
-				setItemWithPos(items);
-			} else {
-				setItemWithPos((prev) => [...prev, ...items]);
-			}
 
 			preRenderItem();
 		};
@@ -248,6 +279,11 @@ export function Masonry<T>({
 		rowKey,
 		scrollContainer,
 	]);
+
+	// columns 变化会导致全量渲染
+	// gutter 变化会导致全量渲染
+	// colWidth 变化会导致全量渲染
+	// data 变化会导致增量渲染
 
 	useEffect(() => {
 		const delay = 200;
@@ -284,7 +320,7 @@ export function Masonry<T>({
 
 		const container = scrollContainer.current;
 
-		const delay = 50;
+		const delay = 10;
 
 		const throttledOnScroll = throttle(onScroll, delay);
 		const debouncedOnScroll = debounce(onScroll, delay);
@@ -303,6 +339,14 @@ export function Masonry<T>({
 		};
 	}, [bottomThreshold, onReachBottom, scrollContainer]);
 
+	// useEffect(() => {
+	// 	console.log("itemWithPos", itemWithPos);
+	// }, [itemWithPos]);
+
+	console.log("data", data);
+
+	console.log("itemsRef", itemsRef.current);
+
 	return (
 		<div className={styles.container} ref={containerRef}>
 			<div
@@ -317,13 +361,16 @@ export function Masonry<T>({
 				ref={ref}
 				style={{ height: boxHeight - gutter }}
 			>
-				{itemWithPos.filter(shouldRender).map((item) => (
-					<React.Fragment key={item.item[rowKey] as React.Key}>
-						{shouldRender(item)
-							? render(item.item, colWidth, item.x, item.y, item.index)
-							: null}
-					</React.Fragment>
-				))}
+				{data
+					.map((item) => itemsRef.current[item[rowKey] as string])
+					.filter(shouldRender)
+					.map((item) => (
+						<React.Fragment key={item.item[rowKey] as React.Key}>
+							{shouldRender(item)
+								? render(item.item, colWidth, item.x, item.y, item.index)
+								: null}
+						</React.Fragment>
+					))}
 			</div>
 		</div>
 	);

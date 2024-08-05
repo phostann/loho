@@ -1,6 +1,6 @@
 import { Masonry } from "@hid/components";
 import styles from "./App.module.scss";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import "@hid/components/dist/style.css";
 import { IHomeFeed } from "./types/types.ts";
 
@@ -9,10 +9,13 @@ function App() {
 
 	const [data, setData] = useState<Array<IHomeFeed>>([]);
 
+	const [time, setTime] = useState(1);
+
 	useEffect(() => {
 		fetch("/mock.json")
 			.then((res) => res.json())
 			.then((res) => {
+				console.log("res", res);
 				setData(res);
 			})
 			.catch((e) => {
@@ -20,18 +23,24 @@ function App() {
 			});
 	}, []);
 
+	const total = useMemo(() => {
+		return 16 * time;
+	}, [time]);
+
+	// console.log("data", data.slice(0, total));
+
 	return (
 		<>
 			<div className={styles.container} ref={ref}>
 				{data.length !== 0 ? (
 					<Masonry
 						scrollContainer={ref}
-						data={data.slice(0)}
+						data={data.slice(0, Math.min(total, 50))}
 						rowKey={"id"}
 						gutter={20}
-						columns={6}
+						columns={4}
 						onReachBottom={() => {
-							console.log("到达底部，加载更多");
+							setTime(prev => prev + 1);
 						}}
 						render={(item, width, x, y) => {
 							return (
