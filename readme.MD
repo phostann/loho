@@ -1,5 +1,3 @@
-### hid 是一套基于 React 的组件库
-
-hid 意为 Hi Design，Hi 取自骸字对应的英文谐音单词。
+### loho 一个 React 类库，包含 ui 组件和工具函数，以及 hook
 
 自用，所以组件比较凌乱，未成体系。
