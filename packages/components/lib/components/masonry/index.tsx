@@ -1,9 +1,7 @@
-import * as React from "react";
-import { useCallback, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
-import { ItemQueue } from "../../utils/item-queue.ts";
-import { debounce, throttle } from "../../utils/utils.ts";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import { createRoot, type Root } from "react-dom/client";
 
+import { debounce, throttle } from "../../utils/utils";
 import styles from "./index.module.scss";
 
 type ItemWithPos<T> = {
@@ -24,27 +22,33 @@ export interface MasonryProps<T> {
 	 * 数据
 	 */
 	data: Array<T>;
+
 	/**
 	 * 行标识
 	 */
 	rowKey: keyof T;
+
 	/**
 	 * 列数
 	 */
-	columns: number;
+	columnCount: number;
+
+	columnCountBreakPoints?: Record<number, number>;
+
 	/**
 	 * 间距
 	 */
 	gutter: number;
-	/**
-	 * 预渲染数量, 默认为 40
-	 */
-	preRenderNumber?: number;
 
 	/**
 	 * 滚动容器
 	 */
-	scrollContainer: React.RefObject<HTMLDivElement>;
+	scrollContainer: Window | HTMLElement | string;
+
+	/**
+	 * 真实容器
+	 */
+	containerRef: React.RefObject<HTMLDivElement>;
 
 	/**
 	 * 底部阈值，默认为 100
@@ -78,300 +82,354 @@ export interface MasonryProps<T> {
 export function Masonry<T>({
 	data,
 	rowKey,
-	columns,
+	columnCount,
+	columnCountBreakPoints,
 	gutter,
 	scrollContainer,
-	preRenderNumber = 40,
+	containerRef,
 	bottomThreshold = 100,
 	onReachBottom,
 	render,
 }: MasonryProps<T>) {
-	const containerRef = React.useRef<HTMLDivElement>(null);
 	const tempRef = React.useRef<HTMLDivElement>(null);
 	const ref = React.useRef<HTMLDivElement>(null);
-	const idxRef = useRef(0);
-	const containerWidthRef = useRef(0);
-	const columnsRef = useRef(columns);
+	const tempRootRef = useRef<Root | null>(null);
+	const rootRef = useRef<Root | null>(null);
+
+	// const idxRef = useRef(0);
+	// const containerWidthRef = useRef(0);
+	const columnsRef = useRef(0);
 	const gutterRef = useRef(gutter);
 	const colWidthRef = useRef(0);
 	const itemsRef = useRef<Record<string, ItemWithPos<T>>>({});
-	const hArrRef = useRef<Array<number>>(new Array(columns).fill(0));
+	const hArrRef = useRef<Array<number>>([]);
+	const initialRef = useRef(false);
 
-	const [colWidth, setColWidth] = React.useState(0);
 	const [boxHeight, setBoxHeight] = React.useState(0);
 	const [scrollTop, setScrollTop] = React.useState(0);
+	const [offsetHeight, setOffsetHeight] = React.useState(0);
+	const [clientWidth, setClientWidth] = React.useState(0);
 
-	const [preRenderChildren, setPreRenderChildren] = React.useState<
-		React.ReactNode[]
-	>([]);
-
-	const calculateColWidth = useCallback(() => {
-		if (containerRef.current && scrollContainer.current) {
-			const clientWidth = containerRef.current.clientWidth;
-			const paddingLeft = parseInt(
-				getComputedStyle(containerRef.current).paddingLeft
-			);
-			const paddingRight = parseInt(
-				getComputedStyle(containerRef.current).paddingRight
-			);
-			if (containerWidthRef.current === clientWidth) return;
-			containerWidthRef.current = clientWidth;
-			scrollContainer.current.scrollTop = 0;
-			setColWidth(
-				(clientWidth - (columns - 1) * gutter - paddingLeft - paddingRight) /
-					columns
-			);
-		}
-	}, [columns, gutter, scrollContainer]);
-
-	const shouldRender = React.useCallback(
-		(item?: ItemWithPos<T>) => {
-			if (scrollContainer.current == null || item == null) {
-				return false;
+	const columns = useMemo(() => {
+		let _columns = columnCount;
+		if (columnCountBreakPoints != null) {
+			const keys = Object.keys(columnCountBreakPoints).map(Number);
+			keys.sort((a, b) => b - a);
+			for (const key of keys) {
+				if (clientWidth > Number(key)) {
+					_columns = columnCountBreakPoints![key];
+					break;
+				}
 			}
+		}
 
-			const offsetHeight = scrollContainer.current.offsetHeight;
+		return _columns;
+	}, [clientWidth, columnCount, columnCountBreakPoints]);
 
-			// 元素和可视区域有交叠，则渲染，否则隐藏
-			const top = item.y - scrollTop;
-			const bottom = item.bottom - scrollTop;
+	const colWidth = useMemo(() => {
+		if (columns === 0 || clientWidth === 0) {
+			return 0;
+		}
+		return (clientWidth - (columns + 1) * gutter) / columns;
+	}, [clientWidth, columns, gutter]);
 
+	/**
+	 * x 表示当前元素的 x 坐标
+	 * y 表示当前元素的 y 坐标 + 当前元素的高度
+	 */
+	const shouldRender = useCallback(
+		(x: number, y: number) => {
 			const threshold = 800;
+			const top = -threshold;
+			const bottom = offsetHeight + threshold;
 
-			const x = -threshold;
-			const y = offsetHeight + threshold;
+			const _x = x - scrollTop;
+			const _y = y - scrollTop;
 
-			const isRender =
-				(top > x && top < y) ||
-				(bottom > x && bottom < y) ||
-				(top < x && bottom > y);
-
-			return isRender;
+			if (
+				(_x > top && _x < bottom) ||
+				(_y > top && _y < bottom) ||
+				(_x < top && _y > bottom)
+			) {
+				return true;
+			}
+			return false;
 		},
-		[scrollContainer, scrollTop]
+		[offsetHeight, scrollTop]
 	);
+
+	const renderItems = useCallback(() => {
+		const itemWithPosList = data.map(
+			(item) => itemsRef.current[item[rowKey] as string]
+		);
+		const children = itemWithPosList.map((itemWithPos) => {
+			const { item, x, y, width, index } = itemWithPos;
+			return (
+				<React.Fragment key={item[rowKey] as string}>
+					{shouldRender(y, itemWithPos.bottom)
+						? render(item, width, x, y, index)
+						: null}
+				</React.Fragment>
+			);
+		});
+		rootRef.current?.render(children);
+		initialRef.current = true;
+	}, [data, render, rowKey, shouldRender]);
+
+	useEffect(() => {
+		columnsRef.current = columns;
+	}, [columns]);
 
 	useEffect(() => {
 		if (
-			scrollContainer.current == null ||
 			containerRef.current == null ||
 			tempRef.current == null ||
-			ref.current == null ||
-			data.length === 0 ||
-			colWidth === 0
+			colWidth === 0 ||
+			data.length === 0
 		) {
 			return;
 		}
 
-		let rerender = false;
+		let reRenderAll = false;
 
-		// 如果 columns 变化
-		if (columnsRef.current !== columns) {
-			rerender = true;
-			columnsRef.current = columns;
-		}
-
-		// 如果  gutter 变化
 		if (gutterRef.current !== gutter) {
-			rerender = true;
 			gutterRef.current = gutter;
+			reRenderAll = true;
 		}
 
-		// 如果 colWidth 变化
 		if (colWidthRef.current !== colWidth) {
-			rerender = true;
 			colWidthRef.current = colWidth;
+			reRenderAll = true;
 		}
-
-		idxRef.current = 0;
-		setPreRenderChildren([]);
-
-		// 渲染到 temp 容器中，获取 dom 真实尺寸
-		const queue = new ItemQueue<T>();
-
-		queue.subscribe((items) => {
-			setPreRenderChildren(
-				items.map((item, index) =>
-					createPortal(
-						render(item, colWidth, 0, 0, index),
-						tempRef.current!,
-						item[rowKey] as string
-					)
-				)
-			);
-		});
+		if (initialRef.current === false) {
+			reRenderAll = true;
+		}
 
 		let _data = data;
 
-		// 不需要全量渲染
-		if (!rerender) {
-			const idSet = new Set(Object.keys(itemsRef.current));
-			_data = data.filter((item) => !idSet.has(item[rowKey] as string));
-		} else {
-			itemsRef.current = {};
-			hArrRef.current = new Array(columns).fill(0);
+		if (!reRenderAll) {
+			const set = new Set(Object.keys(itemsRef.current));
+			_data = data.filter((item) => !set.has(item[rowKey] as string));
 		}
 
-		const preRenderItem = () => {
-			if (_data.length === 0 || idxRef.current >= _data.length) {
-				setBoxHeight(Math.max(...hArrRef.current));
-				setPreRenderChildren([]);
-				return;
-			}
-			queue.clear();
-			const items: Array<T> = [];
-			for (
-				let i = idxRef.current;
-				i < idxRef.current + preRenderNumber && i < _data.length;
-				i++
-			) {
-				items.push(_data[i]);
-			}
-			if (items.length !== 0) {
-				queue.setItems(items);
-			}
-		};
+		// 不存在未渲染的元素
+		if (_data.length === 0) {
+			renderItems();
+			return;
+		}
 
-		const observerCallback = () => {
-			tempRef.current?.childNodes?.forEach((node) => {
-				const ele = node as HTMLElement;
-				let col = idxRef.current % columns;
-				if (idxRef.current >= columns) {
+		const observer = new MutationObserver((records) => {
+			const hArr: number[] = [];
+			for (const record of records) {
+				for (const node of record.addedNodes) {
+					const ele = node as HTMLElement;
+					hArr.push(ele.offsetHeight);
+				}
+			}
+
+			_data.forEach((item, index) => {
+				const _index = index + data.length - _data.length;
+				let col = _index % columnsRef.current;
+				if (_index >= columnsRef.current) {
 					col = hArrRef.current.indexOf(Math.min(...hArrRef.current));
 				}
 
-				itemsRef.current[_data[idxRef.current][rowKey] as string] = {
-					x: col * (colWidth + gutter),
+				itemsRef.current[item[rowKey] as string] = {
+					x: col * (colWidth + gutter) + gutter,
 					y: hArrRef.current[col],
 					width: colWidth,
-					height: ele.offsetHeight,
-					bottom: hArrRef.current[col] + ele.offsetHeight,
-					index: idxRef.current,
-					item: _data[idxRef.current],
+					height: hArr[index],
+					bottom: hArrRef.current[col] + hArr[index],
+					index: _index,
+					item,
 				};
-				idxRef.current++;
-				hArrRef.current[col] += ele.offsetHeight + gutter;
+
+				hArrRef.current[col] += hArr[index] + gutter;
 			});
+			if (ref.current != null) {
+				if (rootRef.current == null) {
+					rootRef.current = createRoot(ref.current);
+				}
 
-			preRenderItem();
-		};
+				setBoxHeight(Math.max(...hArrRef.current));
 
-		const observer = new MutationObserver(observerCallback);
+				renderItems();
+
+				observer.disconnect();
+
+				tempRootRef.current?.render([]);
+			}
+		});
 
 		observer.observe(tempRef.current, {
 			childList: true,
 			subtree: true,
 		});
 
-		preRenderItem();
-
-		return () => {
-			queue.unsubscribe();
-			observer.disconnect();
-		};
-	}, [
-		colWidth,
-		columns,
-		data,
-		gutter,
-		preRenderNumber,
-		render,
-		rowKey,
-		scrollContainer,
-	]);
-
-	// columns 变化会导致全量渲染
-	// gutter 变化会导致全量渲染
-	// colWidth 变化会导致全量渲染
-	// data 变化会导致增量渲染
-
-	useEffect(() => {
-		const delay = 200;
-
-		const throttledCallback = throttle(calculateColWidth, delay);
-		const debouncedCallback = debounce(calculateColWidth, delay);
-
-		const resizeObserver = new ResizeObserver(() => {
-			throttledCallback();
-			debouncedCallback();
-		});
-
-		if (containerRef.current) {
-			resizeObserver.observe(containerRef.current);
+		if (tempRootRef.current == null) {
+			tempRootRef.current = createRoot(tempRef.current);
 		}
-		return () => resizeObserver.disconnect();
-	}, [calculateColWidth]);
 
-	// 监听滚动
+		if (reRenderAll) {
+			itemsRef.current = {};
+			hArrRef.current = new Array(columnsRef.current).fill(gutter);
+		}
+
+		const children = _data.map((item, index) => (
+			<React.Fragment key={item[rowKey] as string}>
+				{render(item, colWidth, 0, 0, index)}
+			</React.Fragment>
+		));
+
+		tempRootRef.current?.render(children);
+	}, [colWidth, containerRef, data, gutter, render, renderItems, rowKey]);
+
 	useEffect(() => {
-		const onScroll = () => {
-			if (scrollContainer.current == null) {
-				return;
-			}
-			setScrollTop(scrollContainer.current.scrollTop);
-			if (
-				scrollContainer.current.scrollTop +
-					scrollContainer.current.offsetHeight >=
-				scrollContainer.current.scrollHeight - bottomThreshold
-			) {
-				onReachBottom?.();
+		if (scrollContainer == null) {
+			return;
+		}
+		const onResize = () => {
+			setClientWidth(containerRef.current!.clientWidth);
+
+			if (scrollContainer === window) {
+				setOffsetHeight(window.innerHeight);
+			} else {
+				if (scrollContainer instanceof HTMLElement) {
+					setOffsetHeight(scrollContainer.clientHeight);
+				}
+				if (typeof scrollContainer === "string") {
+					const ele = document.querySelector(scrollContainer);
+					if (ele != null) {
+						setOffsetHeight(ele.clientHeight);
+					}
+				}
 			}
 		};
 
-		const container = scrollContainer.current;
+		const throttledOnResize = throttle(onResize, 100);
+		const debounceOnResize = debounce(onResize, 100);
 
-		const delay = 10;
+		const _onResize = () => {
+			throttledOnResize();
+			debounceOnResize();
+		};
 
-		const throttledOnScroll = throttle(onScroll, delay);
-		const debouncedOnScroll = debounce(onScroll, delay);
+		onResize();
 
-		container?.addEventListener(
-			"scroll",
-			() => {
-				throttledOnScroll();
-				debouncedOnScroll();
-			},
-			false
-		);
+		if (scrollContainer === window) {
+			window.addEventListener("resize", _onResize);
+		}
+
+		const resizeObserver = new ResizeObserver(_onResize);
+
+		if (scrollContainer instanceof HTMLElement) {
+			resizeObserver.observe(scrollContainer);
+		}
+		if (typeof scrollContainer === "string") {
+			const ele = document.querySelector(scrollContainer);
+			if (ele != null) {
+				resizeObserver.observe(ele);
+			}
+		}
+		return () => {
+			if (scrollContainer === window) {
+				window.removeEventListener("resize", _onResize);
+			}
+			if (scrollContainer instanceof HTMLElement) {
+				resizeObserver.disconnect();
+			}
+			if (typeof scrollContainer === "string") {
+				const ele = document.querySelector(scrollContainer);
+				if (ele != null) {
+					resizeObserver.disconnect();
+				}
+			}
+		};
+	}, [columns, containerRef, gutter, scrollContainer]);
+
+	useEffect(() => {
+		if (scrollContainer == null) {
+			return;
+		}
+
+		const onScroll = () => {
+			if (scrollContainer === window) {
+				setScrollTop(window.scrollY);
+				if (
+					window.innerHeight + window.scrollY >=
+					document.body.scrollHeight - bottomThreshold
+				) {
+					onReachBottom?.();
+				}
+			}
+			if (scrollContainer instanceof HTMLElement) {
+				setScrollTop(scrollContainer.scrollTop);
+				if (
+					scrollContainer.clientHeight + scrollContainer.scrollTop >=
+					scrollContainer.scrollHeight - bottomThreshold
+				) {
+					onReachBottom?.();
+				}
+			}
+			if (typeof scrollContainer === "string") {
+				const ele = document.querySelector(scrollContainer);
+				if (ele != null) {
+					setScrollTop(ele.scrollTop);
+					if (
+						ele.clientHeight + ele.scrollTop >=
+						ele.scrollHeight - bottomThreshold
+					) {
+						onReachBottom?.();
+					}
+				}
+			}
+		};
+
+		const throttledOnScroll = throttle(onScroll, 100);
+		const debouncedOnScroll = debounce(onScroll, 100);
+
+		const _onScroll = () => {
+			throttledOnScroll();
+			debouncedOnScroll();
+		};
+
+		if (scrollContainer === window) {
+			window.addEventListener("scroll", _onScroll, false);
+		}
+		if (scrollContainer instanceof HTMLElement) {
+			scrollContainer.addEventListener("scroll", _onScroll, false);
+		}
+		if (typeof scrollContainer === "string") {
+			const ele = document.querySelector(scrollContainer);
+			if (ele != null) {
+				ele.addEventListener("scroll", _onScroll, false);
+			}
+		}
 
 		return () => {
-			container?.removeEventListener("scroll", onScroll, false);
+			if (scrollContainer === window) {
+				window.removeEventListener("scroll", _onScroll);
+			}
+			if (scrollContainer instanceof HTMLElement) {
+				scrollContainer.removeEventListener("scroll", _onScroll);
+			}
+			if (typeof scrollContainer === "string") {
+				const ele = document.querySelector(scrollContainer);
+				if (ele != null) {
+					ele.removeEventListener("scroll", _onScroll);
+				}
+			}
 		};
 	}, [bottomThreshold, onReachBottom, scrollContainer]);
 
-	// useEffect(() => {
-	// 	console.log("itemWithPos", itemWithPos);
-	// }, [itemWithPos]);
-
-	console.log("data", data);
-
-	console.log("itemsRef", itemsRef.current);
-
 	return (
-		<div className={styles.container} ref={containerRef}>
+		<>
 			<div
 				className={styles.tempContainer}
 				ref={tempRef}
 				style={{ width: colWidth }}
-			>
-				{preRenderChildren}
-			</div>
-			<div
-				className={styles.box}
-				ref={ref}
-				style={{ height: boxHeight - gutter }}
-			>
-				{data
-					.map((item) => itemsRef.current[item[rowKey] as string])
-					.filter(shouldRender)
-					.map((item) => (
-						<React.Fragment key={item.item[rowKey] as React.Key}>
-							{shouldRender(item)
-								? render(item.item, colWidth, item.x, item.y, item.index)
-								: null}
-						</React.Fragment>
-					))}
-			</div>
-		</div>
+			></div>
+			<div className={styles.box} ref={ref} style={{ height: boxHeight }}></div>
+		</>
 	);
 }

@@ -11,6 +11,8 @@ function App() {
 
 	const [time, setTime] = useState(1);
 
+	const [columns, setColumns] = useState(4);
+
 	useEffect(() => {
 		fetch("/mock.json")
 			.then((res) => res.json())
@@ -24,23 +26,36 @@ function App() {
 	}, []);
 
 	const total = useMemo(() => {
-		return 16 * time;
+		return 15 * time;
 	}, [time]);
 
-	// console.log("data", data.slice(0, total));
+	useEffect(() => {
+		setTimeout(() => {
+			// setColumns(5);
+		}, 5000);
+	}, []);
 
 	return (
 		<>
 			<div className={styles.container} ref={ref}>
 				{data.length !== 0 ? (
 					<Masonry
-						scrollContainer={ref}
-						data={data.slice(0, Math.min(total, 50))}
+						scrollContainer={window}
+						containerRef={ref}
+						data={data.slice(0)}
 						rowKey={"id"}
 						gutter={20}
-						columns={4}
+						columnCount={columns}
+						columnCountBreakPoints={{
+							800: 2,
+							1100: 3,
+							1400: 4,
+							1700: 5,
+							2000: 6,
+						}}
+						// columnCountBreakpoints={{ 800: 2, 1100: 3, 1400: 4, 1700: 5, 2000: 6 }}
 						onReachBottom={() => {
-							setTime(prev => prev + 1);
+							// setTime((prev) => prev + 1);
 						}}
 						render={(item, width, x, y) => {
 							return (
@@ -48,7 +63,7 @@ function App() {
 									className={styles.itemContainer}
 									style={{
 										width,
-										transform: `translateX(${x}px) translateY(${y}px)`,
+										transform: `translate(${x}px, ${y}px)`,
 									}}
 								>
 									<img

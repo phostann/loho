@@ -1,15 +1,9 @@
-.container {
-	width: 100%;
-	box-sizing: border-box;
-	padding: 20px;
-
-	.box {
-		position: relative;
-		overflow: hidden;
-	}
+.box {
+	position: relative;
+	overflow: hidden;
 }
 
 .tempContainer {
-	position: fixed;
+	position: absolute;
 	left: -1000px;
 }
