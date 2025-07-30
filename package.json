@@ -1,5 +1,6 @@
 {
   "name": "loho",
+  "appName": "类库",
   "version": "1.0.0",
   "description": "一个实用的 React 类库",
   "main": "index.js",
